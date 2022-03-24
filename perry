@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+debug=1
+session_uuid=""
+default_branch="master"
+
+if [ -f ".git/refs/heads/main" ]; then
+  default_branch="main"
+fi
+
+log() {
+  local type="$1"
+  local message="$2"
+
+  if [ $debug == 1 ]; then
+    echo "[$(date +%Y-%m-%dT%H:%M:%S%z)] ${type^^} : ${message}"
+  fi
+}
+
+help() {
+  echo "
+perry <command>
+
+usage:
+  finish        Ends a pair programming session removing branches
+  load          Loads a pair programming session with given session id
+  save          Store local changes to pair programming session branch
+  start         Starts a new pair programming session
+  sync          Synchronizes the pair programming session using remote
+  "
+}
+
+start() {
+  session_uuid="$(uuidgen)"
+
+  # save progress to stash
+  pair_session="pair-session-${session_uuid}"
+  git stash save --quiet --no-keep-index --include-untracked "$pair_session"
+
+  # getting the current branch name
+  current_branch="$(git rev-parse --abbrev-ref HEAD)"
+
+  # creating a new working pair branch
+  pair_branch="pair-${session_uuid}"
+  git checkout --quiet "$default_branch"
+  git pull origin --quiet "$default_branch"
+  git checkout --quiet -b "$pair_branch"
+
+  # applying the stashed changes
+  stash_id=$(git stash list | grep "$pair_session" | cut -d":" -f1)
+  git stash pop --quiet "$stash_id"
+}
+
+load() {
+  local session_uuid="$1"
+
+  # fetch all remote branchs
+  git fetch --all --quiet
+
+  # checkout pair session branch
+  pair_branch="pair-${session_uuid}"
+  git checkout --quiet "$pair_branch"
+  git pull origin --quiet "$pair_branch"
+}
+
+sync() {
+  session_uuid="$(git rev-parse --abbrev-ref HEAD | sed -e 's/pair-//')"
+
+  # save progress to stash
+  pair_session="pair-session-local-${session_uuid}"
+  git stash save --quiet --no-keep-index --include-untracked "$pair_session"
+  log 'info' "Local changes saved at '${pair_session}' stash"
+
+  # sync pair session branch
+  pair_branch="pair-${session_uuid}"
+  git fetch --all --quiet
+  git pull origin --quiet "$pair_branch"
+
+  # undo last wip saved state (to be safe)
+  git log -n 1 | grep -q -c "\-\-wip\-\-" && git reset HEAD~1
+}
+
+save() {
+  session_uuid="$(git rev-parse --abbrev-ref HEAD | sed -e 's/pair-//')"
+
+  pair_branch="pair-${session_uuid}"
+  git pull origin --quiet "$default_branch"
+
+  # undo last wip saved state (to be safe)
+  git log -n 1 | grep -q -c "\-\-wip\-\-" && git reset HEAD~1
+
+  # prepare a new wip state
+  git add -A; git rm $(git ls-files --deleted) 2> /dev/null; git commit --no-verify --no-gpg-sign -m "--wip-- [skip ci]"
+
+  # save wip state to git repo
+  git push --force --quiet origin "$pair_branch"
+
+  # undo last wip saved state again
+  git log -n 1 | grep -q -c "\-\-wip\-\-" && git reset HEAD~1
+  log 'info' "Pair session WIP synced at branch ${pair_branch}"
+}
+
+finish() {
+  session_uuid="$(git rev-parse --abbrev-ref HEAD | sed -e 's/pair-//')"
+
+  # go to default branch
+  git checkout "$default_branch"
+
+  # remove the pair branch
+  pair_branch="pair-${session_uuid}"
+  git branch -D "$pair_branch"
+
+  # delete remote branch
+  git push --delete origin "$pair_branch"
+  log 'info' "Pair session ${session_uuid} are finished. Good work!"
+}
+
+
+# execute command
+$*
