@@ -20,9 +20,12 @@ log() {
 
 help() {
   echo "
-perry <command>
+Perry is a simple Pair Programming CLI tool for distributed teams
 
-usage:
+USAGE:
+  perry <command>
+
+COMMANDS:
   finish        Ends a pair programming session removing branches
   load          Loads a pair programming session with given session id
   save          Store local changes to pair programming session branch
@@ -116,6 +119,11 @@ finish() {
   log 'info' "Pair session ${session_uuid} are finished. Good work!"
 }
 
+# show help if no command given
+if [ -z "$@" ]; then
+  help
+  exit 1
+fi
 
 # execute command
 $*
