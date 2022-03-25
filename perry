@@ -53,7 +53,10 @@ start() {
 
   # applying the stashed changes
   stash_id=$(git stash list | grep "$pair_session" | cut -d":" -f1)
-  git stash pop --quiet "$stash_id"
+  git stash pop --quiet $stash_id
+
+  # create remote pair session branch
+  save
 }
 
 load() {
