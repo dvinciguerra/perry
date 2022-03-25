@@ -5,7 +5,8 @@ debug=1
 session_uuid=""
 default_branch="master"
 
-if [ -f ".git/refs/heads/main" ]; then
+# validate default branch name
+if [ -n "$(git branch --all | grep -E '^\*?\s*main$')" ]; then
   default_branch="main"
 fi
 
