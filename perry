@@ -1,24 +1,73 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-debug=1
+debug_level="${PERRY_DEBUG:-0}";
+log_level="${PERRY_LOG:-INFO}";
+# log_level="INFO"
 session_uuid=""
 default_branch="master"
 
 # validate default branch name
-if [ -n "$(git branch --all | grep -E '^\*?\s*main$')" ]; then
+if git branch --all | grep -q -E '^\*?\s*main$'; then
   default_branch="main"
 fi
 
+# Print a log message
+# @param [String] log_level
+# @param [String] message
 log() {
-  local type="$1"
-  local message="$2"
+  # extracted from Zordrak/bashlog (for credits)
+  # https://github.com/Zordrak/bashlog/blob/master/log.sh
+  local -A severities
+  severities['DEBUG']=7
+  severities['INFO']=6
+  severities['NOTICE']=5 # Unused
+  severities['WARN']=4
+  severities['ERROR']=3
+  severities['CRIT']=2   # Unused
+  severities['ALERT']=1  # Unused
+  severities['EMERG']=0  # Unused
 
-  if [ $debug == 1 ]; then
-    echo "[$(date +%Y-%m-%dT%H:%M:%S%z)] ${type^^} : ${message}"
-  fi
+  local -A colours
+  colours['DEBUG']='\033[34m'  # Blue
+  colours['INFO']='\033[32m'   # Green
+  colours['NOTICE']=''         # Unused
+  colours['WARN']='\033[33m'   # Yellow
+  colours['ERROR']='\033[31m'  # Red
+  colours['CRIT']=''           # Unused
+  colours['ALERT']=''          # Unused
+  colours['EMERG']=''          # Unused
+  colours['DEFAULT']='\033[0m' # Default
+
+  local pid="${$}"
+  local level="${1^^}"
+  local message="${2}"
+  local date="$(date +%Y-%m-%dT%H:%M:%S%z)"
+
+  local norm="${colours['DEFAULT']}"
+  local colour="${colours[${level}]:-\033[31m}"
+
+  local std_line="${colour}${date} [${level}] ${message}${norm}"
+
+  case "${level}" in
+    'INFO'|'WARN')
+      echo -e "${std_line}"
+      ;;
+    'DEBUG')
+      if [ "${debug_level}" -gt 0 ]; then
+        echo -e "${std_line}"
+      fi
+      ;;
+    'error')
+      echo -e "${std_line}" >&2
+      ;;
+    *)
+      log 'error' "Undefined log level trying to log: ${@}"
+      ;;
+  esac
 }
 
+# Returns a help message
 help() {
   echo "
 Perry is a simple Pair Programming CLI tool for distributed teams
@@ -35,6 +84,7 @@ COMMANDS:
   "
 }
 
+# Starts pair session
 start() {
   session_uuid="$(uuidgen)"
 
@@ -59,6 +109,7 @@ start() {
   save
 }
 
+# Loads a pair session for a given a session uuid
 load() {
   local session_uuid="$1"
 
@@ -71,6 +122,7 @@ load() {
   git pull origin --quiet "$pair_branch"
 }
 
+# Sync you local pair branch with remote WIP changes
 sync() {
   session_uuid="$(git rev-parse --abbrev-ref HEAD | sed -e 's/pair-//')"
 
@@ -88,6 +140,7 @@ sync() {
   git log -n 1 | grep -q -c "\-\-wip\-\-" && git reset HEAD~1
 }
 
+# Save current work in progress to change pair driver
 save() {
   session_uuid="$(git rev-parse --abbrev-ref HEAD | sed -e 's/pair-//')"
 
@@ -98,7 +151,9 @@ save() {
   git log -n 1 | grep -q -c "\-\-wip\-\-" && git reset HEAD~1
 
   # prepare a new wip state
-  git add -A; git rm $(git ls-files --deleted) 2> /dev/null; git commit --no-verify --no-gpg-sign -m "--wip-- [skip ci]"
+  git add -A
+  git rm $(git ls-files --deleted) 2>/dev/null
+  git commit --no-verify --no-gpg-sign -m "--wip-- [skip ci]"
 
   # save wip state to git repo
   git push --force --quiet origin "$pair_branch"
@@ -108,6 +163,7 @@ save() {
   log 'info' "Pair session WIP synced at branch ${pair_branch}"
 }
 
+# Finish the current pair session
 finish() {
   session_uuid="$(git rev-parse --abbrev-ref HEAD | sed -e 's/pair-//')"
 
@@ -130,4 +186,5 @@ if [ -z "$@" ]; then
 fi
 
 # execute command
+log 'debug' "executing command 'perry $*'"
 $*
